@@ -1,0 +1,31 @@
+name: Bus 33 Automatische Erfassung
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Node.js bereitstellen
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Skript ausführen und Daten sammeln
+        run: node fetch.js
+
+      - name: Neue Daten sichern und hochladen
+        run: |
+          git config --global user.name "ZVV Scraper Bot"
+          git config --global user.email "scraper@github.com"
+          git add data.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Automatische Busdaten-Aktualisierung" && git push)
