@@ -167,6 +167,10 @@
     .chart-wrap { height:240px; }
     header.bar { flex-wrap:wrap; }
   }
+  @media (max-width:460px) {
+    .controls { flex-direction:column; }
+    .btn-glass { text-align:center; }
+  }
 
   /* ── VIEW SLIDER ── */
   .view-slider-wrap {
@@ -276,12 +280,11 @@
       <div class="rows loading" id="rows-roemerhof">Laden<span class="blink">…</span></div>
     </section>
   </div>
-  </div>
 
-  <div class="view-panel" id="panel-stats">
+  </div><div class="view-panel" id="panel-stats">
   <div class="info-banner" id="info-main">
     <span class="info-icon">ℹ️</span>
-    <span>Die Statistiken werden im Hintergrund automatisch alle 15 Minuten per GitHub Actions aktualisiert – auch wenn dein Browser geschlossen ist.</span>
+    <span>Diese Statistiken und Archivdaten werden im Hintergrund vollautomatisch durch einen GitHub Actions-Roboter in der Datei <code>data.json</code> gesichert.</span>
   </div>
 
   <div class="stats-row">
@@ -293,7 +296,7 @@
 
   <div class="chart-card glass">
     <div class="chart-header">
-      <span class="chart-title">Verspätungen nach Uhrzeit (Hintergrund-Archiv)</span>
+      <span class="chart-title">Verspätungen nach Uhrzeit</span>
       <div class="chart-legend">
         <div class="legend-item"><span class="legend-dot" style="background:var(--accent);"></span>Klosbach</div>
         <div class="legend-item"><span class="legend-dot" style="background:var(--blue);"></span>Römerhof</div>
@@ -305,32 +308,30 @@
       <canvas id="chart"></canvas>
       <div class="chart-empty" id="chart-empty">
         <div class="chart-empty-icon">📊</div>
-        <div class="chart-empty-text">Noch keine abgefahrenen Busse in data.json vorhanden.<br>Skript läuft im Hintergrund.</div>
+        <div class="chart-empty-text">Noch keine Archivdaten für heute geladen.<br>Der GitHub Actions Roboter befüllt diese Grafik im Hintergrund.</div>
       </div>
     </div>
     <div class="chart-note">
-      <span><span class="status-dot" id="status-dot"></span><span id="status-msg">Archiv wird geladen...</span></span>
-      <span>Abfahrtstafel live (30s) · Diagramm aktualisiert alle 15 Min. im Hintergrund</span>
+      <span><span class="status-dot" id="status-dot"></span><span id="status-msg">Verbinde zu GitHub...</span></span>
+      <span>Datenquelle: data.json · Automatische Aktualisierung aktiv</span>
     </div>
   </div>
 
   <div class="controls">
-    <button class="btn-glass" id="btn-refresh">↻ &nbsp;Ansicht aktualisieren</button>
+    <button class="btn-glass" id="btn-refresh">↻ &nbsp;Archivdaten jetzt abrufen</button>
   </div>
 
-  <footer class="foot">Datenarchiv via GitHub Actions · transport.opendata.ch</footer>
-  </div>
-</div>
-
-<script>
-const API = 'https://transport.opendata.ch/v1';
+  <footer class="foot">Archivdaten verwaltet via GitHub Actions · Bus 33 Zürich</footer>
+  </div></div><script>
+const API      = 'https://transport.opendata.ch/v1';
 const STATIONS_BOARD = [
   { boardId: 'board-klosbach',  rowsId: 'rows-klosbach',  id: '8591231',            name: 'Zürich, Klosbach' },
   { boardId: 'board-roemerhof', rowsId: 'rows-roemerhof', search: 'Zürich, Römerhof', name: 'Zürich, Römerhof' },
 ];
-let stationIds = { 'Klosbach': '8591231' };
+
 let chartInstance = null;
 
+// ── Uhr ──────────────────────────────────────────────────────────────────────
 function updateClock() {
   document.getElementById('clock').textContent =
     new Date().toLocaleTimeString('de-CH', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
@@ -338,28 +339,32 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
 function minFromMidnight(isoStr) {
   const d = new Date(isoStr);
   return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
 }
 
-// Lade-Funktion für die externe data.json von GitHub Actions
+// ── Daten laden von GitHub ───────────────────────────────────────────────────
 async function loadData() {
   try {
-    const response = await fetch('./data.json?t=' + Date.now());
+    const response = await fetch('data.json?t=' + new Date().getTime());
     if (!response.ok) return [];
     return await response.json();
   } catch (e) {
-    console.warn("Konnte data.json nicht laden, nutze leeres Array", e);
+    console.warn('Keine data.json gefunden oder Fehler beim Laden:', e);
     return [];
   }
 }
 
+// ── Live Abfahrtstafel via API ───────────────────────────────────────────────
 async function lookupId(name) {
   const r = await fetch(`${API}/locations?query=${encodeURIComponent(name)}&type=station`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
-  return d.stations?.[0]?.id ?? null;
+  const id = d.stations?.[0]?.id;
+  if (!id) throw new Error('Station nicht gefunden');
+  return id;
 }
 
 async function fetchDepartures(stationId, limit = 12) {
@@ -371,23 +376,35 @@ async function fetchDepartures(stationId, limit = 12) {
 
 function renderRows(departures, container) {
   const now = new Date();
-  if (!departures.length) { container.innerHTML = '<div class="loading">Keine Abfahrten</div>'; return; }
-  const html = departures.map(entry => {
-    const stop = entry.stop ?? {};
-    if (!stop.departure) return '';
-    const plannedDt = new Date(stop.departure);
+  const filtered = (departures ?? []).filter(e => String(e.number ?? '').trim() === '33');
+  
+  if (!filtered.length) { container.innerHTML = '<div class="loading">Keine aktuellen Abfahrten der Linie 33</div>'; return; }
+  
+  const html = filtered.map(entry => {
+    const stop   = entry.stop ?? {};
+    const depRaw = stop.departure;
+    if (!depRaw) return '';
+    const plannedDt = new Date(depRaw);
     const planned   = plannedDt.toLocaleTimeString('de-CH', { hour:'2-digit', minute:'2-digit' });
-    const actualDt  = stop.prognosis?.departure ? new Date(stop.prognosis.departure) : plannedDt;
+    const progRaw   = stop.prognosis?.departure;
+    const actualDt  = progRaw ? new Date(progRaw) : plannedDt;
     const delayMin  = Math.round((actualDt - plannedDt) / 60000);
     const diff      = Math.round((actualDt - now) / 60000);
+    const dest      = entry.to ?? '';
+    const linie     = `${entry.category ?? ''} ${entry.number ?? ''}`.trim();
+    const platform  = stop.platform ?? '–';
     const delayStr  = delayMin > 0 ? `+${delayMin}'` : delayMin < 0 ? `${delayMin}'` : '✓';
-    return `<div class="${diff < 0 ? 'row departed' : 'row'}">
+    const delayCls  = delayMin > 0 ? 'delay-late' : 'delay-ok';
+    const depClass  = diff < 0 ? 'row departed' : 'row';
+    const inStr     = diff < 0 ? 'abgef.' : diff === 0 ? 'jetzt' : `${diff}'`;
+    const inCls     = diff <= 2 && diff >= 0 ? 'countdown soon' : 'countdown';
+    return `<div class="${depClass}">
       <span class="time">${planned}</span>
-      <span class="${delayMin > 0 ? 'delay-late' : 'delay-ok'}">${delayStr}</span>
-      <span class="${diff <= 2 && diff >= 0 ? 'countdown soon' : 'countdown'}">${diff < 0 ? 'abgef.' : diff === 0 ? 'jetzt' : `${diff}'`}</span>
-      <span><span class="line-badge">${(entry.category ?? '') + ' ' + (entry.number ?? '')}</span></span>
-      <span class="destination">${entry.to ?? ''}</span>
-      <span class="platform">${stop.platform ?? '–'}</span>
+      <span class="${delayCls}">${delayStr}</span>
+      <span class="${inCls}">${inStr}</span>
+      <span><span class="line-badge">${linie}</span></span>
+      <span class="destination">${dest}</span>
+      <span class="platform">${platform}</span>
     </div>`;
   }).join('');
   container.innerHTML = html.trim() || '<div class="loading">Keine Abfahrten</div>';
@@ -396,134 +413,207 @@ function renderRows(departures, container) {
 async function loadStation(station) {
   const rowsEl = document.getElementById(station.rowsId);
   try {
-    if (!station._id) station._id = station.id ?? await lookupId(station.search);
+    if (!station._id) {
+      station._id = station.id ?? await lookupId(station.search);
+    }
     const deps = await fetchDepartures(station._id);
     rowsEl.className = 'rows';
     renderRows(deps, rowsEl);
   } catch(e) {
-    rowsEl.innerHTML = `<div class="error">Fehler<br><small>${e.message}</small></div>`;
+    rowsEl.className = 'rows error-state';
+    rowsEl.innerHTML = `<div class="error">Fehler beim Laden<br><small>${e.message}</small></div>`;
   }
 }
 
 async function refreshBoards() {
   for (const station of STATIONS_BOARD) {
     await loadStation(station);
+    await new Promise(r => setTimeout(r, 200));
   }
 }
 
+// ── Statistiken berechnen ────────────────────────────────────────────────────
 function updateStats(data) {
   const cnt = data.length;
   document.getElementById('stat-count').textContent = cnt || '–';
   if (!cnt) {
-    ['stat-avg','stat-ontime','stat-max'].forEach(id => document.getElementById(id).textContent = '–');
+    ['stat-avg','stat-ontime','stat-max'].forEach(id => {
+      document.getElementById(id).textContent = '–';
+      document.getElementById(id).className = 'stat-value';
+    });
     return;
   }
   const delays = data.map(p => p.delay);
-  const avg = delays.reduce((a,b)=>a+b,0)/cnt;
-  const onPct = delays.filter(d=>d<=0).length/cnt*100;
-  const maxD = Math.max(...delays);
-  
-  document.getElementById('stat-avg').textContent = `${avg>=0?'+':''}${avg.toFixed(1)}'`;
-  document.getElementById('stat-ontime').textContent = `${onPct.toFixed(0)} %`;
-  document.getElementById('stat-max').textContent = `+${maxD}'`;
+  const avg    = delays.reduce((a,b)=>a+b,0)/cnt;
+  const onPct  = delays.filter(d=>d<=0).length/cnt*100;
+  const maxD   = Math.max(...delays);
+  const avgEl = document.getElementById('stat-avg');
+  avgEl.textContent = `${avg>=0?'+':''}${avg.toFixed(1)}'`;
+  avgEl.className   = 'stat-value '+(avg>3?'val-late':avg>1?'val-warn':'val-ok');
+  const onEl = document.getElementById('stat-ontime');
+  onEl.textContent = `${onPct.toFixed(0)} %`;
+  onEl.className   = 'stat-value '+(onPct>=80?'val-ok':onPct>=60?'val-warn':'val-late');
+  const maxEl = document.getElementById('stat-max');
+  maxEl.textContent = maxD>0?`+${maxD}'`:`${maxD}'`;
+  maxEl.className   = 'stat-value '+(maxD>5?'val-late':maxD>2?'val-warn':'val-ok');
 }
 
+// ── Diagramm rendern ─────────────────────────────────────────────────────────
 const nowLinePlugin = {
   id: 'nowLine',
   afterDraw(chart) {
     const { ctx, chartArea, scales } = chart;
     if (!chartArea) return;
-    const now = new Date();
-    const x = scales.x.getPixelForValue(now.getHours()*60 + now.getMinutes());
+    const now  = new Date();
+    const mins = now.getHours()*60+now.getMinutes();
+    const x    = scales.x.getPixelForValue(mins);
     if (x < chartArea.left || x > chartArea.right) return;
-    ctx.save(); ctx.beginPath(); ctx.moveTo(x,chartArea.top); ctx.lineTo(x,chartArea.bottom);
+    ctx.save();
+    ctx.beginPath(); ctx.moveTo(x,chartArea.top); ctx.lineTo(x,chartArea.bottom);
     ctx.strokeStyle='rgba(48,209,88,0.65)'; ctx.lineWidth=1.5; ctx.setLineDash([3,4]); ctx.stroke();
+    ctx.fillStyle='rgba(48,209,88,0.8)'; ctx.font='10px Inter,sans-serif';
+    ctx.fillText('Jetzt',x+4,chartArea.top+13);
     ctx.restore();
   }
 };
 
 function renderChart(data) {
-  document.getElementById('chart-empty').style.display = data.length ? 'none' : 'flex';
+  const empty = document.getElementById('chart-empty');
+  empty.style.display = data.length ? 'none' : 'flex';
   const klPts = data.filter(p=>p.stop==='Klosbach').map(p=>({x:minFromMidnight(p.planned),y:p.delay,_p:p}));
   const roPts = data.filter(p=>p.stop==='Römerhof').map(p=>({x:minFromMidnight(p.planned),y:p.delay,_p:p}));
 
   if (chartInstance) {
     chartInstance.data.datasets[0].data = klPts;
     chartInstance.data.datasets[1].data = roPts;
-    chartInstance.update();
+    chartInstance.update('active');
     return;
   }
-  chartInstance = new Chart(document.getElementById('chart').getContext('2d'), {
-    type: 'scatter', plugins: [nowLinePlugin],
+  const canvasEl = document.getElementById('chart');
+  if (!canvasEl.offsetParent) {
+    canvasEl.style.width = '100%';
+    canvasEl.style.height = '360px';
+  }
+  const ctx = canvasEl.getContext('2d');
+  chartInstance = new Chart(ctx, {
+    type: 'scatter',
+    plugins: [nowLinePlugin],
     data: {
       datasets: [
-        { label: 'Klosbach', data: klPts, backgroundColor: 'rgba(255,159,10,0.75)', pointRadius: 3.5 },
-        { label: 'Römerhof', data: roPts, backgroundColor: 'rgba(10,132,255,0.75)', pointRadius: 3.5 },
-        { label: '', data: [{x:5*60,y:0},{x:24*60,y:0}], type: 'line', borderColor: 'rgba(255,255,255,0.15)', pointRadius:0, fill:false }
+        {
+          label: 'Klosbach', data: klPts,
+          backgroundColor: 'rgba(255,159,10,0.75)',
+          pointRadius: 3, pointHoverRadius: 6,
+          pointBorderColor: 'rgba(255,159,10,0.2)', pointBorderWidth: 1,
+        },
+        {
+          label: 'Römerhof', data: roPts,
+          backgroundColor: 'rgba(10,132,255,0.75)',
+          pointRadius: 3, pointHoverRadius: 6,
+          pointBorderColor: 'rgba(10,132,255,0.2)', pointBorderWidth: 1,
+        },
+        {
+          label: '',
+          data: [{x:5*60,y:0},{x:24*60,y:0}],
+          type: 'line',
+          borderColor: 'rgba(255,255,255,0.22)',
+          borderDash: [5,5], borderWidth:1, pointRadius:0, fill:false, tension:0,
+        }
       ]
     },
     options: {
-      responsive:true, maintainAspectRatio:false,
+      responsive:true, maintainAspectRatio:false, animation:{duration:350},
+      plugins: {
+        legend: { display:false },
+        tooltip: {
+          backgroundColor: 'rgba(14,14,24,0.92)',
+          borderColor: 'rgba(255,255,255,0.14)', borderWidth:1, padding:12,
+          titleFont:{family:'Inter',size:13,weight:'600'}, bodyFont:{family:'Inter',size:12},
+          titleColor:'#f5f5f7', bodyColor:'rgba(245,245,247,0.72)',
+          callbacks: {
+            title(items) {
+              const m=items[0].parsed.x;
+              return `${String(Math.floor(m/60)).padStart(2,'0')}:${String(Math.round(m%60)).padStart(2,'0')} Uhr`;
+            },
+            label(item) {
+              if (!item.raw._p) return '';
+              const p=item.raw._p, d=item.parsed.y;
+              const dStr=d>0?`+${d} Min.`:d<0?`${d} Min.`:'✓ pünktlich';
+              return [`${item.dataset.label}`,`Richtung: ${p.direction||'–'}`,`Verspätung: ${dStr}`];
+            }
+          }
+        }
+      },
       scales: {
-        x: { type:'linear', min:5*60, max:24*60, ticks: { stepSize:60, callback:v=>`${String(Math.floor(v/60)).padStart(2,'0')}:00`, color:'rgba(245,245,247,0.4)' } },
-        y: { ticks:{ callback:v=>`${v}'`, color:'rgba(245,245,247,0.4)' } }
+        x: {
+          type:'linear', min:5*60, max:24*60,
+          ticks: { stepSize:60, callback:v=>`${String(Math.floor(v/60)).padStart(2,'0')}:00`,
+            color:'rgba(245,245,247,0.45)', font:{family:'Inter',size:11}, maxRotation:0 },
+          grid:{color:'rgba(255,255,255,0.055)'}, border:{color:'rgba(255,255,255,0.1)'},
+          title:{display:true,text:'Uhrzeit',color:'rgba(245,245,247,0.4)',font:{family:'Inter',size:11}}
+        },
+        y: {
+          ticks:{ callback:v=>v>0?`+${v}'`:`${v}'`, color:'rgba(245,245,247,0.45)', font:{family:'Inter',size:11} },
+          grid:{color:'rgba(255,255,255,0.055)'}, border:{color:'rgba(255,255,255,0.1)'},
+          title:{display:true,text:'Verspätung (Min.)',color:'rgba(245,245,247,0.4)',font:{family:'Inter',size:11}}
+        }
       }
     }
   });
 }
 
-async function refreshDelays() {
-  const msg = document.getElementById('status-msg');
+// ── GitHub Archiv-Refresh via data.json ──────────────────────────────────────
+async function refreshArchiveData() {
   const dot = document.getElementById('status-dot');
-  try {
-    const data = await loadData();
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const todayData = data.filter(p => p.planned && p.planned.startsWith(todayStr));
+  const msg = document.getElementById('status-msg');
+  if (dot) dot.className = 'status-dot loading';
+  if (msg) msg.textContent = 'Lade Daten von GitHub...';
 
-    updateStats(todayData);
-    renderChart(todayData);
-    
-    msg.textContent = `Archiv synchronisiert (${todayData.length} Busse heute)`;
-    dot.className = 'status-dot';
-  } catch(e) {
-    msg.textContent = "Warte auf erstes Hintergrund-Backup...";
-    dot.className = 'status-dot loading';
-  }
+  const stored = await loadData();
+  updateStats(stored);
+  renderChart(stored);
+
+  const t = new Date().toLocaleTimeString('de-CH', { hour:'2-digit', minute:'2-digit' });
+  if (dot) dot.className = 'status-dot';
+  if (msg) msg.textContent = `Datenpunkte geladen: ${stored.length} · Stand: ${t}`;
 }
 
+// ── View Switcher ─────────────────────────────────────────────────────────────
 function switchView(view) {
   ['departures', 'stats'].forEach(p => {
     document.getElementById('panel-' + p).classList.toggle('active', p === view);
     document.getElementById('tab-' + p).classList.toggle('active', p === view);
   });
   document.getElementById('slider-thumb').classList.toggle('right', view === 'stats');
-  if (view === 'stats' && chartInstance) requestAnimationFrame(() => chartInstance.resize());
+  if (view === 'stats' && chartInstance) {
+    requestAnimationFrame(() => { chartInstance.resize(); });
+  }
 }
 
+// ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
   try {
     const roId = await lookupId('Zürich, Römerhof');
     const roStation = STATIONS_BOARD.find(s => s.name === 'Zürich, Römerhof');
     if (roStation) roStation._id = roId;
-  } catch(e){}
+  } catch(e) {
+    console.warn('Römerhof lookup fehlgeschlagen', e);
+  }
 
-  const stored = await loadData();
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const todayData = stored.filter(p => p.planned && p.planned.startsWith(todayStr));
-  if (todayData.length) { updateStats(todayData); renderChart(todayData); }
-  else { renderChart([]); }
-
+  // 1. Live-Abfahrtstafel sofort starten & alle 30 Sek. aktualisieren
   refreshBoards();
   setInterval(refreshBoards, 30000);
 
-  await refreshDelays();
-  setInterval(refreshDelays, 60000);
+  // 2. Archiv-Diagrammdaten von GitHub holen & alle 5 Min. im Hintergrund erneuern
+  await refreshArchiveData();
+  setInterval(refreshArchiveData, 5 * 60 * 1000);
 
+  // Button-Event
   document.getElementById('btn-refresh').addEventListener('click', () => {
-    refreshBoards();
-    refreshDelays();
+    refreshArchiveData();
   });
 }
+
 init();
 </script>
 </body>
