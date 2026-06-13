@@ -284,7 +284,7 @@
   </div><div class="view-panel" id="panel-stats">
   <div class="info-banner" id="info-main">
     <span class="info-icon">ℹ️</span>
-    <span>Diese Statistiken und Archivdaten werden im Hintergrund vollautomatisch durch einen GitHub Actions-Roboter in der Datei <code>data.json</code> gesichert.</span>
+    <span>Diese Statistiken werden im Hintergrund durch einen GitHub Actions-Roboter in der Datei <code>data.json</code> gesichert und von dort geladen.</span>
   </div>
 
   <div class="stats-row">
@@ -308,12 +308,12 @@
       <canvas id="chart"></canvas>
       <div class="chart-empty" id="chart-empty">
         <div class="chart-empty-icon">📊</div>
-        <div class="chart-empty-text">Noch keine Archivdaten für heute geladen.<br>Der GitHub Actions Roboter befüllt diese Grafik im Hintergrund.</div>
+        <div class="chart-empty-text">Noch keine Archivdaten für heute vorhanden.<br>Der GitHub Actions Roboter schreibt diese im Hintergrund in die data.json.</div>
       </div>
     </div>
     <div class="chart-note">
       <span><span class="status-dot" id="status-dot"></span><span id="status-msg">Verbinde zu GitHub...</span></span>
-      <span>Datenquelle: data.json · Automatische Aktualisierung aktiv</span>
+      <span>Datenquelle: data.json · Aktualisierung läuft im Hintergrund</span>
     </div>
   </div>
 
@@ -323,7 +323,7 @@
 
   <footer class="foot">Archivdaten verwaltet via GitHub Actions · Bus 33 Zürich</footer>
   </div></div><script>
-const API      = 'https://transport.opendata.ch/v1';
+const API = 'https://transport.opendata.ch/v1';
 const STATIONS_BOARD = [
   { boardId: 'board-klosbach',  rowsId: 'rows-klosbach',  id: '8591231',            name: 'Zürich, Klosbach' },
   { boardId: 'board-roemerhof', rowsId: 'rows-roemerhof', search: 'Zürich, Römerhof', name: 'Zürich, Römerhof' },
@@ -345,7 +345,7 @@ function minFromMidnight(isoStr) {
   return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
 }
 
-// ── Daten laden von GitHub ───────────────────────────────────────────────────
+// ── Daten laden von GitHub data.json ─────────────────────────────────────────
 async function loadData() {
   try {
     const response = await fetch('data.json?t=' + new Date().getTime());
@@ -367,7 +367,7 @@ async function lookupId(name) {
   return id;
 }
 
-async function fetchDepartures(stationId, limit = 12) {
+async function fetchDepartures(stationId, limit = 20) {
   const r = await fetch(`${API}/stationboard?id=${stationId}&limit=${limit}`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
@@ -376,9 +376,18 @@ async function fetchDepartures(stationId, limit = 12) {
 
 function renderRows(departures, container) {
   const now = new Date();
-  const filtered = (departures ?? []).filter(e => String(e.number ?? '').trim() === '33');
   
-  if (!filtered.length) { container.innerHTML = '<div class="loading">Keine aktuellen Abfahrten der Linie 33</div>'; return; }
+  // FIX: Prüft sowohl .number als auch .line auf "33", da APIs städtische Linien unterschiedlich ausgeben
+  const filtered = (departures ?? []).filter(e => {
+    const nr = String(e.number ?? '').trim();
+    const ln = String(e.line ?? '').trim();
+    return nr === '33' || ln === '33';
+  });
+  
+  if (!filtered.length) { 
+    container.innerHTML = '<div class="loading">Keine aktuellen Abfahrten der Linie 33</div>'; 
+    return; 
+  }
   
   const html = filtered.map(entry => {
     const stop   = entry.stop ?? {};
@@ -391,7 +400,7 @@ function renderRows(departures, container) {
     const delayMin  = Math.round((actualDt - plannedDt) / 60000);
     const diff      = Math.round((actualDt - now) / 60000);
     const dest      = entry.to ?? '';
-    const linie     = `${entry.category ?? ''} ${entry.number ?? ''}`.trim();
+    const linie     = `Bus 33`;
     const platform  = stop.platform ?? '–';
     const delayStr  = delayMin > 0 ? `+${delayMin}'` : delayMin < 0 ? `${delayMin}'` : '✓';
     const delayCls  = delayMin > 0 ? 'delay-late' : 'delay-ok';
