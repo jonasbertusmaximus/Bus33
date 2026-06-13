@@ -324,9 +324,11 @@
   <footer class="foot">Archivdaten verwaltet via GitHub Actions · Bus 33 Zürich</footer>
   </div></div><script>
 const API = 'https://transport.opendata.ch/v1';
+
+// Fest eingebaute IDs, damit keine API-Suchen fehlschlagen können
 const STATIONS_BOARD = [
-  { boardId: 'board-klosbach',  rowsId: 'rows-klosbach',  id: '8591231',            name: 'Zürich, Klosbach' },
-  { boardId: 'board-roemerhof', rowsId: 'rows-roemerhof', search: 'Zürich, Römerhof', name: 'Zürich, Römerhof' },
+  { boardId: 'board-klosbach',  rowsId: 'rows-klosbach',  id: '8591231', name: 'Zürich, Klosbach' },
+  { boardId: 'board-roemerhof', rowsId: 'rows-roemerhof', id: '8591324', name: 'Zürich, Römerhof' }
 ];
 
 let chartInstance = null;
@@ -339,7 +341,6 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
 function minFromMidnight(isoStr) {
   const d = new Date(isoStr);
   return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
@@ -352,36 +353,32 @@ async function loadData() {
     if (!response.ok) return [];
     return await response.json();
   } catch (e) {
-    console.warn('Keine data.json gefunden oder Fehler beim Laden:', e);
+    console.warn('Keine data.json gefunden:', e);
     return [];
   }
 }
 
 // ── Live Abfahrtstafel via API ───────────────────────────────────────────────
-async function lookupId(name) {
-  const r = await fetch(`${API}/locations?query=${encodeURIComponent(name)}&type=station`);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const d = await r.json();
-  const id = d.stations?.[0]?.id;
-  if (!id) throw new Error('Station nicht gefunden');
-  return id;
-}
-
 async function fetchDepartures(stationId, limit = 20) {
-  const r = await fetch(`${API}/stationboard?id=${stationId}&limit=${limit}`);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const d = await r.json();
-  return d.stationboard ?? [];
+  try {
+    const r = await fetch(`${API}/stationboard?id=${stationId}&limit=${limit}`);
+    if (!r.ok) return [];
+    const d = await r.json();
+    return d.stationboard ?? [];
+  } catch(e) {
+    console.error(e);
+    return [];
+  }
 }
 
 function renderRows(departures, container) {
   const now = new Date();
   
-  // FIX: Prüft sowohl .number als auch .line auf "33", da APIs städtische Linien unterschiedlich ausgeben
+  // Filtere Busse der Linie 33 über alle möglichen Datenfelder ab (sicher gegen API-Variationen)
   const filtered = (departures ?? []).filter(e => {
     const nr = String(e.number ?? '').trim();
     const ln = String(e.line ?? '').trim();
-    return nr === '33' || ln === '33';
+    return nr === '33' || ln === '33' || nr.includes('33') || ln.includes('33');
   });
   
   if (!filtered.length) { 
@@ -400,95 +397,55 @@ function renderRows(departures, container) {
     const delayMin  = Math.round((actualDt - plannedDt) / 60000);
     const diff      = Math.round((actualDt - now) / 60000);
     const dest      = entry.to ?? '';
-    const linie     = `Bus 33`;
     const platform  = stop.platform ?? '–';
     const delayStr  = delayMin > 0 ? `+${delayMin}'` : delayMin < 0 ? `${delayMin}'` : '✓';
     const delayCls  = delayMin > 0 ? 'delay-late' : 'delay-ok';
     const depClass  = diff < 0 ? 'row departed' : 'row';
     const inStr     = diff < 0 ? 'abgef.' : diff === 0 ? 'jetzt' : `${diff}'`;
     const inCls     = diff <= 2 && diff >= 0 ? 'countdown soon' : 'countdown';
+    
     return `<div class="${depClass}">
       <span class="time">${planned}</span>
       <span class="${delayCls}">${delayStr}</span>
       <span class="${inCls}">${inStr}</span>
-      <span><span class="line-badge">${linie}</span></span>
+      <span><span class="line-badge">Bus 33</span></span>
       <span class="destination">${dest}</span>
       <span class="platform">${platform}</span>
     </div>`;
   }).join('');
-  container.innerHTML = html.trim() || '<div class="loading">Keine Abfahrten</div>';
-}
-
-async function loadStation(station) {
-  const rowsEl = document.getElementById(station.rowsId);
-  try {
-    if (!station._id) {
-      station._id = station.id ?? await lookupId(station.search);
-    }
-    const deps = await fetchDepartures(station._id);
-    rowsEl.className = 'rows';
-    renderRows(deps, rowsEl);
-  } catch(e) {
-    rowsEl.className = 'rows error-state';
-    rowsEl.innerHTML = `<div class="error">Fehler beim Laden<br><small>${e.message}</small></div>`;
-  }
+  container.innerHTML = html.trim();
 }
 
 async function refreshBoards() {
   for (const station of STATIONS_BOARD) {
-    await loadStation(station);
-    await new Promise(r => setTimeout(r, 200));
+    const rowsEl = document.getElementById(station.rowsId);
+    if (!rowsEl) continue;
+    const deps = await fetchDepartures(station.id);
+    rowsEl.className = 'rows';
+    renderRows(deps, rowsEl);
   }
 }
 
-// ── Statistiken berechnen ────────────────────────────────────────────────────
+// ── Statistiken & Diagramm ───────────────────────────────────────────────────
 function updateStats(data) {
   const cnt = data.length;
   document.getElementById('stat-count').textContent = cnt || '–';
   if (!cnt) {
-    ['stat-avg','stat-ontime','stat-max'].forEach(id => {
-      document.getElementById(id).textContent = '–';
-      document.getElementById(id).className = 'stat-value';
-    });
+    ['stat-avg','stat-ontime','stat-max'].forEach(id => { document.getElementById(id).textContent = '–'; });
     return;
   }
   const delays = data.map(p => p.delay);
   const avg    = delays.reduce((a,b)=>a+b,0)/cnt;
   const onPct  = delays.filter(d=>d<=0).length/cnt*100;
   const maxD   = Math.max(...delays);
-  const avgEl = document.getElementById('stat-avg');
-  avgEl.textContent = `${avg>=0?'+':''}${avg.toFixed(1)}'`;
-  avgEl.className   = 'stat-value '+(avg>3?'val-late':avg>1?'val-warn':'val-ok');
-  const onEl = document.getElementById('stat-ontime');
-  onEl.textContent = `${onPct.toFixed(0)} %`;
-  onEl.className   = 'stat-value '+(onPct>=80?'val-ok':onPct>=60?'val-warn':'val-late');
-  const maxEl = document.getElementById('stat-max');
-  maxEl.textContent = maxD>0?`+${maxD}'`:`${maxD}'`;
-  maxEl.className   = 'stat-value '+(maxD>5?'val-late':maxD>2?'val-warn':'val-ok');
+  document.getElementById('stat-avg').textContent = `${avg>=0?'+':''}${avg.toFixed(1)}'`;
+  document.getElementById('stat-ontime').textContent = `${onPct.toFixed(0)} %`;
+  document.getElementById('stat-max').textContent = maxD>0?`+${maxD}'`:`${maxD}'`;
 }
-
-// ── Diagramm rendern ─────────────────────────────────────────────────────────
-const nowLinePlugin = {
-  id: 'nowLine',
-  afterDraw(chart) {
-    const { ctx, chartArea, scales } = chart;
-    if (!chartArea) return;
-    const now  = new Date();
-    const mins = now.getHours()*60+now.getMinutes();
-    const x    = scales.x.getPixelForValue(mins);
-    if (x < chartArea.left || x > chartArea.right) return;
-    ctx.save();
-    ctx.beginPath(); ctx.moveTo(x,chartArea.top); ctx.lineTo(x,chartArea.bottom);
-    ctx.strokeStyle='rgba(48,209,88,0.65)'; ctx.lineWidth=1.5; ctx.setLineDash([3,4]); ctx.stroke();
-    ctx.fillStyle='rgba(48,209,88,0.8)'; ctx.font='10px Inter,sans-serif';
-    ctx.fillText('Jetzt',x+4,chartArea.top+13);
-    ctx.restore();
-  }
-};
 
 function renderChart(data) {
   const empty = document.getElementById('chart-empty');
-  empty.style.display = data.length ? 'none' : 'flex';
+  if(empty) empty.style.display = data.length ? 'none' : 'flex';
   const klPts = data.filter(p=>p.stop==='Klosbach').map(p=>({x:minFromMidnight(p.planned),y:p.delay,_p:p}));
   const roPts = data.filter(p=>p.stop==='Römerhof').map(p=>({x:minFromMidnight(p.planned),y:p.delay,_p:p}));
 
@@ -499,130 +456,58 @@ function renderChart(data) {
     return;
   }
   const canvasEl = document.getElementById('chart');
-  if (!canvasEl.offsetParent) {
-    canvasEl.style.width = '100%';
-    canvasEl.style.height = '360px';
-  }
+  if (!canvasEl) return;
   const ctx = canvasEl.getContext('2d');
   chartInstance = new Chart(ctx, {
     type: 'scatter',
-    plugins: [nowLinePlugin],
     data: {
       datasets: [
-        {
-          label: 'Klosbach', data: klPts,
-          backgroundColor: 'rgba(255,159,10,0.75)',
-          pointRadius: 3, pointHoverRadius: 6,
-          pointBorderColor: 'rgba(255,159,10,0.2)', pointBorderWidth: 1,
-        },
-        {
-          label: 'Römerhof', data: roPts,
-          backgroundColor: 'rgba(10,132,255,0.75)',
-          pointRadius: 3, pointHoverRadius: 6,
-          pointBorderColor: 'rgba(10,132,255,0.2)', pointBorderWidth: 1,
-        },
-        {
-          label: '',
-          data: [{x:5*60,y:0},{x:24*60,y:0}],
-          type: 'line',
-          borderColor: 'rgba(255,255,255,0.22)',
-          borderDash: [5,5], borderWidth:1, pointRadius:0, fill:false, tension:0,
-        }
+        { label: 'Klosbach', data: klPts, backgroundColor: 'rgba(255,159,10,0.75)' },
+        { label: 'Römerhof', data: roPts, backgroundColor: 'rgba(10,132,255,0.75)' }
       ]
     },
     options: {
-      responsive:true, maintainAspectRatio:false, animation:{duration:350},
-      plugins: {
-        legend: { display:false },
-        tooltip: {
-          backgroundColor: 'rgba(14,14,24,0.92)',
-          borderColor: 'rgba(255,255,255,0.14)', borderWidth:1, padding:12,
-          titleFont:{family:'Inter',size:13,weight:'600'}, bodyFont:{family:'Inter',size:12},
-          titleColor:'#f5f5f7', bodyColor:'rgba(245,245,247,0.72)',
-          callbacks: {
-            title(items) {
-              const m=items[0].parsed.x;
-              return `${String(Math.floor(m/60)).padStart(2,'0')}:${String(Math.round(m%60)).padStart(2,'0')} Uhr`;
-            },
-            label(item) {
-              if (!item.raw._p) return '';
-              const p=item.raw._p, d=item.parsed.y;
-              const dStr=d>0?`+${d} Min.`:d<0?`${d} Min.`:'✓ pünktlich';
-              return [`${item.dataset.label}`,`Richtung: ${p.direction||'–'}`,`Verspätung: ${dStr}`];
-            }
-          }
-        }
-      },
+      responsive:true, maintainAspectRatio:false,
       scales: {
-        x: {
-          type:'linear', min:5*60, max:24*60,
-          ticks: { stepSize:60, callback:v=>`${String(Math.floor(v/60)).padStart(2,'0')}:00`,
-            color:'rgba(245,245,247,0.45)', font:{family:'Inter',size:11}, maxRotation:0 },
-          grid:{color:'rgba(255,255,255,0.055)'}, border:{color:'rgba(255,255,255,0.1)'},
-          title:{display:true,text:'Uhrzeit',color:'rgba(245,245,247,0.4)',font:{family:'Inter',size:11}}
-        },
-        y: {
-          ticks:{ callback:v=>v>0?`+${v}'`:`${v}'`, color:'rgba(245,245,247,0.45)', font:{family:'Inter',size:11} },
-          grid:{color:'rgba(255,255,255,0.055)'}, border:{color:'rgba(255,255,255,0.1)'},
-          title:{display:true,text:'Verspätung (Min.)',color:'rgba(245,245,247,0.4)',font:{family:'Inter',size:11}}
-        }
+        x: { type:'linear', min:5*60, max:24*60, ticks:{stepSize:60, callback:v=>`${String(Math.floor(v/60)).padStart(2,'0')}:00`} },
+        y: { ticks:{ callback:v=>`${v}'` } }
       }
     }
   });
 }
 
-// ── GitHub Archiv-Refresh via data.json ──────────────────────────────────────
 async function refreshArchiveData() {
-  const dot = document.getElementById('status-dot');
   const msg = document.getElementById('status-msg');
-  if (dot) dot.className = 'status-dot loading';
-  if (msg) msg.textContent = 'Lade Daten von GitHub...';
-
+  if (msg) msg.textContent = 'Lade Daten...';
   const stored = await loadData();
   updateStats(stored);
   renderChart(stored);
-
-  const t = new Date().toLocaleTimeString('de-CH', { hour:'2-digit', minute:'2-digit' });
-  if (dot) dot.className = 'status-dot';
-  if (msg) msg.textContent = `Datenpunkte geladen: ${stored.length} · Stand: ${t}`;
+  if (msg) msg.textContent = `Datenpunkte geladen: ${stored.length}`;
 }
 
-// ── View Switcher ─────────────────────────────────────────────────────────────
 function switchView(view) {
   ['departures', 'stats'].forEach(p => {
     document.getElementById('panel-' + p).classList.toggle('active', p === view);
     document.getElementById('tab-' + p).classList.toggle('active', p === view);
   });
   document.getElementById('slider-thumb').classList.toggle('right', view === 'stats');
-  if (view === 'stats' && chartInstance) {
-    requestAnimationFrame(() => { chartInstance.resize(); });
-  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
-  try {
-    const roId = await lookupId('Zürich, Römerhof');
-    const roStation = STATIONS_BOARD.find(s => s.name === 'Zürich, Römerhof');
-    if (roStation) roStation._id = roId;
-  } catch(e) {
-    console.warn('Römerhof lookup fehlgeschlagen', e);
-  }
-
-  // 1. Live-Abfahrtstafel sofort starten & alle 30 Sek. aktualisieren
+  // Sofort live laden
   refreshBoards();
   setInterval(refreshBoards, 30000);
 
-  // 2. Archiv-Diagrammdaten von GitHub holen & alle 5 Min. im Hintergrund erneuern
+  // Archiv laden
   await refreshArchiveData();
   setInterval(refreshArchiveData, 5 * 60 * 1000);
 
-  // Button-Event
   document.getElementById('btn-refresh').addEventListener('click', () => {
+    refreshBoards();
     refreshArchiveData();
   });
 }
-
 init();
 </script>
 </body>
