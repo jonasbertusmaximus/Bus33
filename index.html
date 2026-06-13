@@ -281,7 +281,7 @@
   <div class="view-panel" id="panel-stats">
   <div class="info-banner" id="info-main">
     <span class="info-icon">ℹ️</span>
-    <span>Die Statistiken werden im Hintergrund automatisch alle 15 Minuten per GitHub Actions aktualisiert.</span>
+    <span>Die Statistiken werden im Hintergrund automatisch alle 15 Minuten per GitHub Actions aktualisiert – auch wenn dein Browser geschlossen ist.</span>
   </div>
 
   <div class="stats-row">
@@ -309,7 +309,7 @@
       </div>
     </div>
     <div class="chart-note">
-      <span><span class="status-dot" id="status-dot"></span><span id="status-msg">Archiv geladen</span></span>
+      <span><span class="status-dot" id="status-dot"></span><span id="status-msg">Archiv wird geladen...</span></span>
       <span>Abfahrtstafel live (30s) · Diagramm aktualisiert alle 15 Min. im Hintergrund</span>
     </div>
   </div>
@@ -341,6 +341,18 @@ updateClock();
 function minFromMidnight(isoStr) {
   const d = new Date(isoStr);
   return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+}
+
+// Lade-Funktion für die externe data.json von GitHub Actions
+async function loadData() {
+  try {
+    const response = await fetch('./data.json?t=' + Date.now());
+    if (!response.ok) return [];
+    return await response.json();
+  } catch (e) {
+    console.warn("Konnte data.json nicht laden, nutze leeres Array", e);
+    return [];
+  }
 }
 
 async function lookupId(name) {
@@ -464,12 +476,9 @@ async function refreshDelays() {
   const msg = document.getElementById('status-msg');
   const dot = document.getElementById('status-dot');
   try {
-    const r = await fetch('./data.json?t=' + Date.now());
-    if (!r.ok) throw new Error('Keine Archivdaten gefunden.');
-    const data = await r.json();
-    
+    const data = await loadData();
     const todayStr = new Date().toISOString().slice(0, 10);
-    const todayData = data.filter(p => p.planned.startsWith(todayStr));
+    const todayData = data.filter(p => p.planned && p.planned.startsWith(todayStr));
 
     updateStats(todayData);
     renderChart(todayData);
@@ -497,6 +506,12 @@ async function init() {
     const roStation = STATIONS_BOARD.find(s => s.name === 'Zürich, Römerhof');
     if (roStation) roStation._id = roId;
   } catch(e){}
+
+  const stored = await loadData();
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayData = stored.filter(p => p.planned && p.planned.startsWith(todayStr));
+  if (todayData.length) { updateStats(todayData); renderChart(todayData); }
+  else { renderChart([]); }
 
   refreshBoards();
   setInterval(refreshBoards, 30000);
