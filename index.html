@@ -158,6 +158,8 @@
     cursor:pointer; letter-spacing:.01em; transition:background .15s,transform .1s; }
   .btn-glass:hover { background:rgba(255,255,255,.18); transform:translateY(-1px); }
   .btn-glass:active { transform:translateY(0); }
+  .btn-danger { color:var(--red); border-color:rgba(255,69,58,.3); }
+  .btn-danger:hover { background:rgba(255,69,58,.1); }
 
   footer.foot { margin-top:20px; text-align:center; font-size:.7rem; color:var(--text-muted); letter-spacing:.06em; }
 
@@ -284,7 +286,11 @@
   </div><div class="view-panel" id="panel-stats">
   <div class="info-banner" id="info-main">
     <span class="info-icon">ℹ️</span>
-    <span>Diese Statistiken werden im Hintergrund durch einen GitHub Actions-Roboter in der Datei <code>data.json</code> gesichert und von dort geladen.</span>
+    <span><b>Hybrid-Modus aktiv:</b> Das Dashboard lädt Archivdaten aus der <code>data.json</code> von GitHub UND sammelt neue Live-Punkte lokal im Browser, solange dieser Tab geöffnet bleibt.</span>
+  </div>
+  <div class="info-banner" id="info-loading" style="display:none; background:rgba(255,159,10,.08); border-color:rgba(255,159,10,.25);">
+    <span class="info-icon">⏳</span>
+    <span id="info-loading-text">Verspätungsdaten werden im Hintergrund synchronisiert…</span>
   </div>
 
   <div class="stats-row">
@@ -308,28 +314,32 @@
       <canvas id="chart"></canvas>
       <div class="chart-empty" id="chart-empty">
         <div class="chart-empty-icon">📊</div>
-        <div class="chart-empty-text">Noch keine Archivdaten für heute vorhanden.<br>Der GitHub Actions Roboter schreibt diese im Hintergrund in die data.json.</div>
+        <div class="chart-empty-text">Warte auf Datenpunkte...<br>Punkte erscheinen automatisch, sobald Busse abfahren.</div>
       </div>
     </div>
     <div class="chart-note">
-      <span><span class="status-dot" id="status-dot"></span><span id="status-msg">Verbinde zu GitHub...</span></span>
-      <span>Datenquelle: data.json · Aktualisierung läuft im Hintergrund</span>
+      <span><span class="status-dot loading" id="status-dot"></span><span id="status-msg">Verbinde…</span></span>
+      <span>transport.opendata.ch · Abfahrten alle 30s · Diagramm alle 5 Min.</span>
     </div>
   </div>
 
   <div class="controls">
-    <button class="btn-glass" id="btn-refresh">↻ &nbsp;Archivdaten jetzt abrufen</button>
+    <button class="btn-glass" id="btn-refresh">↻ &nbsp;Jetzt aktualisieren</button>
+    <button class="btn-glass btn-danger" id="btn-reset">✕ &nbsp;Lokale Daten zurücksetzen</button>
   </div>
 
-  <footer class="foot">Archivdaten verwaltet via GitHub Actions · Bus 33 Zürich</footer>
+  <footer class="foot">Daten: transport.opendata.ch + Local Storage · Bus 33 Zürich</footer>
   </div></div><script>
-const API = 'https://transport.opendata.ch/v1';
+const API      = 'https://transport.opendata.ch/v1';
+const TODAY    = new Date().toISOString().slice(0, 10);
+const STORE_KEY = `zvv_linie33_${TODAY}`;
 
-// Fest eingebaute IDs, damit keine API-Suchen fehlschlagen können
+// Fest eingebaute IDs zur Vermeidung von Race Conditions und Suchfehlern
 const STATIONS_BOARD = [
   { boardId: 'board-klosbach',  rowsId: 'rows-klosbach',  id: '8591231', name: 'Zürich, Klosbach' },
   { boardId: 'board-roemerhof', rowsId: 'rows-roemerhof', id: '8591324', name: 'Zürich, Römerhof' }
 ];
+const stationIds = { 'Klosbach': '8591231', 'Römerhof': '8591324' };
 
 let chartInstance = null;
 
@@ -341,50 +351,108 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
+// ── LocalStorage & Hybrid Engine ─────────────────────────────────────────────
+let _memStore = null;
+function storageAvailable() {
+  try { localStorage.setItem('_t','1'); localStorage.removeItem('_t'); return true; }
+  catch { return false; }
+}
+const USE_LS = storageAvailable();
+
+// Lädt die data.json von GitHub UND die lokal erfassten Daten aus dem Browser
+async function loadAllData() {
+  let githubData = [];
+  try {
+    const response = await fetch('data.json?t=' + new Date().getTime());
+    if (response.ok) {
+      githubData = await response.json();
+    }
+  } catch (e) {
+    console.warn('Keine data.json auf GitHub gefunden, nutze lokale Daten:', e);
+  }
+
+  let localData = [];
+  if (USE_LS) {
+    try { localData = JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch { localData = []; }
+  } else {
+    localData = _memStore ? [..._memStore] : [];
+  }
+
+  return mergeData(githubData, localData);
+}
+
+function saveLocalData(d) {
+  if (USE_LS) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(d)); } catch(e) { console.warn('localStorage voll', e); }
+  }
+  _memStore = [...d];
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 function minFromMidnight(isoStr) {
   const d = new Date(isoStr);
   return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
 }
 
-// ── Daten laden von GitHub data.json ─────────────────────────────────────────
-async function loadData() {
-  try {
-    const response = await fetch('data.json?t=' + new Date().getTime());
-    if (!response.ok) return [];
-    return await response.json();
-  } catch (e) {
-    console.warn('Keine data.json gefunden:', e);
-    return [];
-  }
+function mergeData(existing, fresh) {
+  const keys = new Set(existing.map(p => p.key));
+  return [...existing, ...fresh.filter(p => !keys.has(p.key))];
 }
 
-// ── Live Abfahrtstafel via API ───────────────────────────────────────────────
-async function fetchDepartures(stationId, limit = 20) {
-  try {
-    const r = await fetch(`${API}/stationboard?id=${stationId}&limit=${limit}`);
-    if (!r.ok) return [];
-    const d = await r.json();
-    return d.stationboard ?? [];
-  } catch(e) {
-    console.error(e);
-    return [];
-  }
+// ── API Abfragen & Filterung ──────────────────────────────────────────────────
+async function fetchLine33(stationId, stopName) {
+  const r = await fetch(`${API}/stationboard?id=${stationId}&limit=50`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = await r.json();
+  const board = d.stationboard ?? [];
+  const now = new Date();
+
+  return board
+    .filter(e => {
+      const nr = String(e.number ?? '').trim();
+      const ln = String(e.line ?? '').trim();
+      return nr === '33' || ln === '33' || nr.includes('33') || ln.includes('33');
+    })
+    .map(e => {
+      const stop    = e.stop ?? {};
+      const planned = stop.departure;
+      if (!planned) return null;
+
+      const plannedDt = new Date(planned);
+      const progRaw   = stop.prognosis?.departure;
+      const actualDt  = progRaw ? new Date(progRaw) : plannedDt;
+      const delayMin  = Math.round((actualDt - plannedDt) / 60000);
+
+      return {
+        key:       `${stopName}_${planned}`,
+        stop:      stopName,
+        planned:   plannedDt.toISOString(),
+        delay:     delayMin,
+        direction: e.to ?? '',
+        category:  e.category ?? '',
+        departed:  actualDt <= now,
+      };
+    })
+    .filter(Boolean);
+}
+
+async function fetchDepartures(stationId, limit = 12) {
+  const r = await fetch(`${API}/stationboard?id=${stationId}&limit=${limit}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = await r.json();
+  return d.stationboard ?? [];
 }
 
 function renderRows(departures, container) {
   const now = new Date();
   
-  // Filtere Busse der Linie 33 über alle möglichen Datenfelder ab (sicher gegen API-Variationen)
   const filtered = (departures ?? []).filter(e => {
     const nr = String(e.number ?? '').trim();
     const ln = String(e.line ?? '').trim();
     return nr === '33' || ln === '33' || nr.includes('33') || ln.includes('33');
   });
-  
-  if (!filtered.length) { 
-    container.innerHTML = '<div class="loading">Keine aktuellen Abfahrten der Linie 33</div>'; 
-    return; 
-  }
+
+  if (!filtered.length) { container.innerHTML = '<div class="loading">Keine aktuellen Abfahrten (Linie 33)</div>'; return; }
   
   const html = filtered.map(entry => {
     const stop   = entry.stop ?? {};
@@ -403,7 +471,6 @@ function renderRows(departures, container) {
     const depClass  = diff < 0 ? 'row departed' : 'row';
     const inStr     = diff < 0 ? 'abgef.' : diff === 0 ? 'jetzt' : `${diff}'`;
     const inCls     = diff <= 2 && diff >= 0 ? 'countdown soon' : 'countdown';
-    
     return `<div class="${depClass}">
       <span class="time">${planned}</span>
       <span class="${delayCls}">${delayStr}</span>
@@ -420,32 +487,68 @@ async function refreshBoards() {
   for (const station of STATIONS_BOARD) {
     const rowsEl = document.getElementById(station.rowsId);
     if (!rowsEl) continue;
-    const deps = await fetchDepartures(station.id);
-    rowsEl.className = 'rows';
-    renderRows(deps, rowsEl);
+    try {
+      const deps = await fetchDepartures(station.id);
+      rowsEl.className = 'rows';
+      renderRows(deps, rowsEl);
+    } catch(e) {
+      rowsEl.className = 'rows error-state';
+      rowsEl.innerHTML = `<div class="error">Fehler beim Laden<br><small>${e.message}</small></div>`;
+    }
   }
 }
 
-// ── Statistiken & Diagramm ───────────────────────────────────────────────────
+// ── Statistiken berechnen ────────────────────────────────────────────────────
 function updateStats(data) {
   const cnt = data.length;
   document.getElementById('stat-count').textContent = cnt || '–';
   if (!cnt) {
-    ['stat-avg','stat-ontime','stat-max'].forEach(id => { document.getElementById(id).textContent = '–'; });
+    ['stat-avg','stat-ontime','stat-max'].forEach(id => {
+      document.getElementById(id).textContent = '–';
+      document.getElementById(id).className = 'stat-value';
+    });
     return;
   }
   const delays = data.map(p => p.delay);
   const avg    = delays.reduce((a,b)=>a+b,0)/cnt;
   const onPct  = delays.filter(d=>d<=0).length/cnt*100;
   const maxD   = Math.max(...delays);
-  document.getElementById('stat-avg').textContent = `${avg>=0?'+':''}${avg.toFixed(1)}'`;
-  document.getElementById('stat-ontime').textContent = `${onPct.toFixed(0)} %`;
-  document.getElementById('stat-max').textContent = maxD>0?`+${maxD}'`:`${maxD}'`;
+  
+  const avgEl = document.getElementById('stat-avg');
+  avgEl.textContent = `${avg>=0?'+':''}${avg.toFixed(1)}'`;
+  avgEl.className   = 'stat-value '+(avg>3?'val-late':avg>1?'val-warn':'val-ok');
+  
+  const onEl = document.getElementById('stat-ontime');
+  onEl.textContent = `${onPct.toFixed(0)} %`;
+  onEl.className   = 'stat-value '+(onPct>=80?'val-ok':onPct>=60?'val-warn':'val-late');
+  
+  const maxEl = document.getElementById('stat-max');
+  maxEl.textContent = maxD>0?`+${maxD}'`:`${maxD}'`;
+  maxEl.className   = 'stat-value '+(maxD>5?'val-late':maxD>2?'val-warn':'val-ok');
 }
+
+// ── Diagramm (Chart.js) ──────────────────────────────────────────────────────
+const nowLinePlugin = {
+  id: 'nowLine',
+  afterDraw(chart) {
+    const { ctx, chartArea, scales } = chart;
+    if (!chartArea) return;
+    const now  = new Date();
+    const mins = now.getHours()*60+now.getMinutes();
+    const x    = scales.x.getPixelForValue(mins);
+    if (x < chartArea.left || x > chartArea.right) return;
+    ctx.save();
+    ctx.beginPath(); ctx.moveTo(x,chartArea.top); ctx.lineTo(x,chartArea.bottom);
+    ctx.strokeStyle='rgba(48,209,88,0.65)'; ctx.lineWidth=1.5; ctx.setLineDash([3,4]); ctx.stroke();
+    ctx.fillStyle='rgba(48,209,88,0.8)'; ctx.font='10px Inter,sans-serif';
+    ctx.fillText('Jetzt',x+4,chartArea.top+13);
+    ctx.restore();
+  }
+};
 
 function renderChart(data) {
   const empty = document.getElementById('chart-empty');
-  if(empty) empty.style.display = data.length ? 'none' : 'flex';
+  if (empty) empty.style.display = data.length ? 'none' : 'flex';
   const klPts = data.filter(p=>p.stop==='Klosbach').map(p=>({x:minFromMidnight(p.planned),y:p.delay,_p:p}));
   const roPts = data.filter(p=>p.stop==='Römerhof').map(p=>({x:minFromMidnight(p.planned),y:p.delay,_p:p}));
 
@@ -457,57 +560,159 @@ function renderChart(data) {
   }
   const canvasEl = document.getElementById('chart');
   if (!canvasEl) return;
+  if (!canvasEl.offsetParent) {
+    canvasEl.style.width = '100%';
+    canvasEl.style.height = '360px';
+  }
   const ctx = canvasEl.getContext('2d');
   chartInstance = new Chart(ctx, {
     type: 'scatter',
+    plugins: [nowLinePlugin],
     data: {
       datasets: [
-        { label: 'Klosbach', data: klPts, backgroundColor: 'rgba(255,159,10,0.75)' },
-        { label: 'Römerhof', data: roPts, backgroundColor: 'rgba(10,132,255,0.75)' }
+        {
+          label: 'Klosbach', data: klPts,
+          backgroundColor: 'rgba(255,159,10,0.75)',
+          pointRadius: 3, pointHoverRadius: 6,
+          pointBorderColor: 'rgba(255,159,10,0.2)', pointBorderWidth: 1,
+        },
+        {
+          label: 'Römerhof', data: roPts,
+          backgroundColor: 'rgba(10,132,255,0.75)',
+          pointRadius: 3, pointHoverRadius: 6,
+          pointBorderColor: 'rgba(10,132,255,0.2)', pointBorderWidth: 1,
+        },
+        {
+          label: '',
+          data: [{x:5*60,y:0},{x:24*60,y:0}],
+          type: 'line',
+          borderColor: 'rgba(255,255,255,0.22)',
+          borderDash: [5,5], borderWidth:1, pointRadius:0, fill:false, tension:0,
+        }
       ]
     },
     options: {
-      responsive:true, maintainAspectRatio:false,
+      responsive:true, maintainAspectRatio:false, animation:{duration:350},
+      plugins: {
+        legend: { display:false },
+        tooltip: {
+          backgroundColor: 'rgba(14,14,24,0.92)',
+          borderColor: 'rgba(255,255,255,0.14)', borderWidth:1, padding:12,
+          titleFont:{family:'Inter',size:13,weight:'600'}, bodyFont:{family:'Inter',size:12},
+          titleColor:'#f5f5f7', bodyColor:'rgba(245,245,247,0.72)',
+          callbacks: {
+            title(items) {
+              const m=items[0].parsed.x;
+              return `${String(Math.floor(m/60)).padStart(2,'0')}:${String(Math.round(m%60)).padStart(2,'0')} Uhr`;
+            },
+            label(item) {
+              if (!item.raw._p) return '';
+              const p=item.raw._p, d=item.parsed.y;
+              const dStr=d>0?`+${d} Min.`:d<0?`${d} Min.`:'✓ pünktlich';
+              return [`${item.dataset.label}`,`Richtung: ${p.direction||'–'}`,`Verspätung: ${dStr}`];
+            }
+          }
+        }
+      },
       scales: {
-        x: { type:'linear', min:5*60, max:24*60, ticks:{stepSize:60, callback:v=>`${String(Math.floor(v/60)).padStart(2,'0')}:00`} },
-        y: { ticks:{ callback:v=>`${v}'` } }
+        x: {
+          type:'linear', min:5*60, max:24*60,
+          ticks: { stepSize:60, callback:v=>`${String(Math.floor(v/60)).padStart(2,'0')}:00`,
+            color:'rgba(245,245,247,0.45)', font:{family:'Inter',size:11}, maxRotation:0 },
+          grid:{color:'rgba(255,255,255,0.055)'}, border:{color:'rgba(255,255,255,0.1)'},
+          title:{display:true,text:'Uhrzeit',color:'rgba(245,245,247,0.4)',font:{family:'Inter',size:11}}
+        },
+        y: {
+          ticks:{ callback:v=>v>0?`+${v}'`:`${v}'`, color:'rgba(245,245,247,0.45)', font:{family:'Inter',size:11} },
+          grid:{color:'rgba(255,255,255,0.055)'}, border:{color:'rgba(255,255,255,0.1)'},
+          title:{display:true,text:'Verspätung (Min.)',color:'rgba(245,245,247,0.4)',font:{family:'Inter',size:11}}
+        }
       }
     }
   });
 }
 
-async function refreshArchiveData() {
+// ── Background Datensammler ──────────────────────────────────────────────────
+async function refreshDelays() {
+  const dot = document.getElementById('status-dot');
   const msg = document.getElementById('status-msg');
-  if (msg) msg.textContent = 'Lade Daten...';
-  const stored = await loadData();
-  updateStats(stored);
-  renderChart(stored);
-  if (msg) msg.textContent = `Datenpunkte geladen: ${stored.length}`;
+  if (dot) dot.className = 'status-dot loading';
+  if (msg) msg.textContent = 'Aktualisiere…';
+  
+  const infoLoading = document.getElementById('info-loading');
+  if (infoLoading) infoLoading.style.display = 'flex';
+
+  let currentData = await loadAllData();
+  let added = 0;
+  const errors = [];
+
+  for (const [name, id] of Object.entries(stationIds)) {
+    try {
+      const pts = await fetchLine33(id, name);
+      const before = currentData.length;
+      currentData = mergeData(currentData, pts);
+      added += currentData.length - before;
+    } catch(e) {
+      errors.push(name);
+      console.error(name, e);
+    }
+  }
+
+  saveLocalData(currentData);
+  updateStats(currentData);
+  renderChart(currentData);
+
+  const t = new Date().toLocaleTimeString('de-CH', { hour:'2-digit', minute:'2-digit' });
+  if (errors.length) {
+    if (dot) dot.className = 'status-dot error';
+    if (msg) msg.textContent = `Fehler bei: ${errors.join(', ')} · ${t}`;
+  } else {
+    if (dot) dot.className = 'status-dot';
+    if (msg) msg.textContent = `${added} neu erfasst · Gesamt: ${currentData.length} · ${t}`;
+    if (infoLoading) infoLoading.style.display = 'none';
+  }
 }
 
+// ── View Switcher ─────────────────────────────────────────────────────────────
 function switchView(view) {
   ['departures', 'stats'].forEach(p => {
     document.getElementById('panel-' + p).classList.toggle('active', p === view);
     document.getElementById('tab-' + p).classList.toggle('active', p === view);
   });
   document.getElementById('slider-thumb').classList.toggle('right', view === 'stats');
+  if (view === 'stats' && chartInstance) {
+    requestAnimationFrame(() => { chartInstance.resize(); });
+  }
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
+// ── Initialization ───────────────────────────────────────────────────────────
 async function init() {
-  // Sofort live laden
+  // 1. Sofort vorhandenen Datenbestand (GitHub + LocalStorage) anzeigen
+  const initialData = await loadAllData();
+  updateStats(initialData);
+  renderChart(initialData);
+
+  // 2. Live-Abfahrtstafeln starten (alle 30 Sekunden)
   refreshBoards();
   setInterval(refreshBoards, 30000);
 
-  // Archiv laden
-  await refreshArchiveData();
-  setInterval(refreshArchiveData, 5 * 60 * 1000);
+  // 3. Lokalen Datenabgleich für das Diagramm starten (alle 5 Minuten)
+  await refreshDelays();
+  setInterval(refreshDelays, 5 * 60 * 1000);
 
+  // 4. Buttons aktivieren
   document.getElementById('btn-refresh').addEventListener('click', () => {
     refreshBoards();
-    refreshArchiveData();
+    refreshDelays();
+  });
+  
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    if (!confirm('Möchtest du deine im Browser lokal erfassten Punkte für heute zurücksetzen? (Die Daten auf GitHub bleiben unberührt)')) return;
+    saveLocalData([]);
+    refreshDelays();
   });
 }
+
 init();
 </script>
 </body>
