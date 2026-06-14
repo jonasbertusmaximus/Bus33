@@ -1,0 +1,52 @@
+name: ZVV Linie 33 Datensammler
+
+on:
+  schedule:
+    # Versucht, den Workflow alle 15 Minuten auszuführen.
+    # Achtung: GitHub verzögert Cron-Jobs in kostenlosen Repos oft stark!
+    - cron: '*/15 * * * *'
+  
+  # Ermöglicht es dir, den Workflow jederzeit manuell bei GitHub Actions zu starten
+  workflow_dispatch:
+
+# Gibt dem Workflow die Erlaubnis, die erzeugte data.json in dein Repo zu schreiben
+permissions:
+  contents: write
+
+jobs:
+  collect-and-save:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Code aus deinem Repository auschecken
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      # 2. Node.js Umgebung einrichten
+      - name: Node.js einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      # 3. Das Skript ausführen, das die Daten von der Transport-API holt
+      # (Stelle sicher, dass der Dateiname hier exakt mit deinem Skript übereinstimmt!)
+      - name: Daten von API abrufen
+        run: node data_fetcher.js
+        continue-on-error: false
+
+      # 4. Die neue oder aktualisierte data.json zurück ins Repository pushen
+      - name: Daten committen und in GitHub-Repo pushen
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Prüfen, ob sich die data.json überhaupt verändert hat
+          git add data.json
+          
+          # Nur committen und pushen, wenn es echte Änderungen gibt (verhindert Fehler)
+          if git diff --staged --quiet; then
+            echo "Keine neuen Datenpunkte gefunden. Überspringe Commit."
+          else
+            git commit -m "Automatische Aktualisierung: Bus-Datenpunkte hinzugefügt [skip ci]"
+            git push
+          fi
