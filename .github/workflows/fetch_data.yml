@@ -2,51 +2,48 @@ name: ZVV Linie 33 Datensammler
 
 on:
   schedule:
-    # Versucht, den Workflow alle 15 Minuten auszuführen.
-    # Achtung: GitHub verzögert Cron-Jobs in kostenlosen Repos oft stark!
+    # Der Bot versucht, alle 15 Minuten zu starten (kann bei GitHub manchmal verzögert sein)
     - cron: '*/15 * * * *'
   
-  # Ermöglicht es dir, den Workflow jederzeit manuell bei GitHub Actions zu starten
+  # Aktiviert den "Run workflow" Button bei GitHub Actions, damit du es manuell testen kannst
   workflow_dispatch:
 
-# Gibt dem Workflow die Erlaubnis, die erzeugte data.json in dein Repo zu schreiben
+# Gibt dem Workflow die Schreibrechte, um die Daten im Repository zu speichern
 permissions:
   contents: write
 
 jobs:
-  collect-and-save:
+  scrape:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Code aus deinem Repository auschecken
+      # 1. Den Code aus deinem Repository auf den GitHub-Server laden
       - name: Repository auschecken
         uses: actions/checkout@v4
 
-      # 2. Node.js Umgebung einrichten
-      - name: Node.js einrichten
+      # 2. Node.js (die Laufzeitumgebung für JavaScript) bereitstellen
+      - name: Node.js bereitstellen
         uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      # 3. Das Skript ausführen, das die Daten von der Transport-API holt
-      # (Stelle sicher, dass der Dateiname hier exakt mit deinem Skript übereinstimmt!)
-      - name: Daten von API abrufen
-        run: node data_fetcher.js
-        continue-on-error: false
+      # 3. Dein Skript "fetch.js" ausführen, um die Busdaten zu holen
+      - name: Skript ausführen und Daten sammeln
+        run: node fetch.js
 
-      # 4. Die neue oder aktualisierte data.json zurück ins Repository pushen
-      - name: Daten committen und in GitHub-Repo pushen
+      # 4. Die aktualisierten Daten automatisch wieder ins Repo pushen
+      - name: Neue Daten sichern und hochladen
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          # Prüfen, ob sich die data.json überhaupt verändert hat
-          git add data.json
+          # Alle Änderungen (inklusive einer neu erstellten data.json) vormerken
+          git add .
           
-          # Nur committen und pushen, wenn es echte Änderungen gibt (verhindert Fehler)
+          # Nur committen und pushen, wenn sich wirklich etwas verändert hat
           if git diff --staged --quiet; then
-            echo "Keine neuen Datenpunkte gefunden. Überspringe Commit."
+            echo "Keine neuen Datenpunkte. Überspringe Upload."
           else
-            git commit -m "Automatische Aktualisierung: Bus-Datenpunkte hinzugefügt [skip ci]"
+            git commit -m "Automatische Aktualisierung: Busdaten hinzugefügt [skip ci]"
             git push
           fi
