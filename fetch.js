@@ -3,7 +3,7 @@ const fs = require('fs');
 const API = 'https://transport.opendata.ch/v1';
 const STATIONS = [
   { name: 'Klosbach', id: '8591231' },
-  { name: 'Römerhof', id: '8591322' }
+  { name: 'Römerhof', id: '8591324' }
 ];
 
 async function fetchLine33(stationId, stopName) {
@@ -14,7 +14,11 @@ async function fetchLine33(stationId, stopName) {
   const now = new Date();
 
   return board
-    .filter(e => String(e.number ?? '').trim() === '33')
+    .filter(e => {
+      const nr = String(e.number ?? '').trim();
+      const ln = String(e.line ?? '').trim();
+      return nr === '33' || ln === '33' || nr.includes('33') || ln.includes('33');
+    })
     .map(e => {
       const stop = e.stop ?? {};
       const planned = stop.departure;
