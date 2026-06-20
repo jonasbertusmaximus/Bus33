@@ -1,1 +1,20 @@
-[]
+[
+  {
+    "key": "Klosbach_2026-06-20T17:51:00+0200",
+    "stop": "Klosbach",
+    "planned": "2026-06-20T15:51:00.000Z",
+    "delay": 6,
+    "direction": "Zürich Tiefenbrunnen, Bahnhof",
+    "category": "B",
+    "departed": true
+  },
+  {
+    "key": "Klosbach_2026-06-20T17:58:00+0200",
+    "stop": "Klosbach",
+    "planned": "2026-06-20T15:58:00.000Z",
+    "delay": 0,
+    "direction": "Zürich, Triemli",
+    "category": "B",
+    "departed": true
+  }
+]
