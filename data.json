@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "key": "Klosbach_2026-07-06T00:35:00+0200",
+    "stop": "Klosbach",
+    "planned": "2026-07-05T22:35:00.000Z",
+    "delay": 0,
+    "direction": "Zürich, Albisriederplatz",
+    "category": "B",
+    "departed": true
+  }
+]
