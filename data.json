@@ -1,10 +1,10 @@
 [
   {
-    "key": "Klosbach_2026-07-08T00:35:00+0200",
+    "key": "Klosbach_2026-07-08T09:42:00+0200",
     "stop": "Klosbach",
-    "planned": "2026-07-07T22:35:00.000Z",
-    "delay": 4,
-    "direction": "Zürich, Albisriederplatz",
+    "planned": "2026-07-08T07:42:00.000Z",
+    "delay": 0,
+    "direction": "Zürich, Triemli",
     "category": "B",
     "departed": true
   }
