@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "key": "Klosbach_2026-07-15T13:59:00+0200",
+    "stop": "Klosbach",
+    "planned": "2026-07-15T11:59:00.000Z",
+    "delay": 4,
+    "direction": "Zürich Tiefenbrunnen, Bahnhof",
+    "category": "B",
+    "departed": true
+  }
+]
