@@ -16,5 +16,14 @@
     "direction": "Zürich Tiefenbrunnen, Bahnhof",
     "category": "B",
     "departed": true
+  },
+  {
+    "key": "Klosbach_2026-07-20T14:51:00+0200",
+    "stop": "Klosbach",
+    "planned": "2026-07-20T12:51:00.000Z",
+    "delay": 4,
+    "direction": "Zürich Tiefenbrunnen, Bahnhof",
+    "category": "B",
+    "departed": true
   }
 ]
