@@ -1,46 +1,10 @@
 [
   {
-    "key": "Klosbach_2026-08-15T05:41:00+0200",
+    "key": "Klosbach_2026-08-16T03:39:00+0200",
     "stop": "Klosbach",
-    "planned": "2026-08-15T03:41:00.000Z",
-    "delay": 2,
-    "direction": "Zürich, Triemli",
-    "category": "B",
-    "departed": true
-  },
-  {
-    "key": "Klosbach_2026-08-15T15:59:00+0200",
-    "stop": "Klosbach",
-    "planned": "2026-08-15T13:59:00.000Z",
+    "planned": "2026-08-16T01:39:00.000Z",
     "delay": 0,
-    "direction": "Zürich Tiefenbrunnen, Bahnhof",
-    "category": "B",
-    "departed": true
-  },
-  {
-    "key": "Klosbach_2026-08-15T19:00:00+0200",
-    "stop": "Klosbach",
-    "planned": "2026-08-15T17:00:00.000Z",
-    "delay": 1,
     "direction": "Zürich, Triemli",
-    "category": "B",
-    "departed": true
-  },
-  {
-    "key": "Klosbach_2026-08-15T21:08:00+0200",
-    "stop": "Klosbach",
-    "planned": "2026-08-15T19:08:00.000Z",
-    "delay": 1,
-    "direction": "Zürich, Triemli",
-    "category": "B",
-    "departed": true
-  },
-  {
-    "key": "Klosbach_2026-08-16T00:59:00+0200",
-    "stop": "Klosbach",
-    "planned": "2026-08-15T22:59:00.000Z",
-    "delay": 0,
-    "direction": "Zürich Tiefenbrunnen, Bahnhof",
     "category": "BN",
     "departed": true
   }
