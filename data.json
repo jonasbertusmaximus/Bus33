@@ -43,5 +43,14 @@
     "direction": "Zürich, Triemli",
     "category": "B",
     "departed": true
+  },
+  {
+    "key": "Klosbach_2026-08-18T20:58:00+0200",
+    "stop": "Klosbach",
+    "planned": "2026-08-18T18:58:00.000Z",
+    "delay": 3,
+    "direction": "Zürich, Triemli",
+    "category": "B",
+    "departed": true
   }
 ]
