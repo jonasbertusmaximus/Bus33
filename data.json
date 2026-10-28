@@ -1,11 +1,1 @@
-[
-  {
-    "key": "Klosbach_2026-10-27T19:21:00+0100",
-    "stop": "Klosbach",
-    "planned": "2026-10-27T18:21:00.000Z",
-    "delay": 0,
-    "direction": "Zürich, Triemli",
-    "category": "B",
-    "departed": true
-  }
-]
+[]
