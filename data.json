@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "key": "Klosbach_2026-11-08T21:41:00+0100",
+    "stop": "Klosbach",
+    "planned": "2026-11-08T20:41:00.000Z",
+    "delay": 0,
+    "direction": "Zürich, Hegibachplatz",
+    "category": "B",
+    "departed": true
+  }
+]
